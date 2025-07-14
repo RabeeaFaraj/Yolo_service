@@ -75,7 +75,7 @@ def save_detection_object(prediction_uid, label, score, box):
             INSERT INTO detection_objects (prediction_uid, label, score, box)
             VALUES (?, ?, ?, ?)
         """, (prediction_uid, label, score, str(box)))
-
+    
 @app.post("/predict")
 def predict(file: UploadFile = File(...)):
     """
@@ -114,7 +114,7 @@ def predict(file: UploadFile = File(...)):
         "prediction_uid": uid, 
         "detection_count": len(results[0].boxes),
         "labels": detected_labels,
-        "time took": processing_time
+        "time_took": processing_time
     }
 
 @app.delete("/prediction/{uid}")
