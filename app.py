@@ -6,6 +6,7 @@ import sqlite3
 import os
 import uuid
 import shutil
+import time
 
 # Disable GPU usage
 import torch
@@ -74,12 +75,14 @@ def save_detection_object(prediction_uid, label, score, box):
             INSERT INTO detection_objects (prediction_uid, label, score, box)
             VALUES (?, ?, ?, ?)
         """, (prediction_uid, label, score, str(box)))
-
+    
 @app.post("/predict")
 def predict(file: UploadFile = File(...)):
     """
     Predict objects in an image
     """
+    start_time = time.time()
+
     ext = os.path.splitext(file.filename)[1]
     uid = str(uuid.uuid4())
     original_path = os.path.join(UPLOAD_DIR, uid + ext)
@@ -105,11 +108,19 @@ def predict(file: UploadFile = File(...)):
         save_detection_object(uid, label, score, bbox)
         detected_labels.append(label)
 
+    processing_time = round(time.time() - start_time, 2)
+
     return {
         "prediction_uid": uid, 
         "detection_count": len(results[0].boxes),
-        "labels": detected_labels
+        "labels": detected_labels,
+        "time_took": processing_time
     }
+
+@app.delete("/prediction/{uid}")
+def delete_prediction(uid: str):
+    
+    return {"status" : "deleted "}
 
 @app.get("/prediction/{uid}")
 def get_prediction_by_uid(uid: str):
