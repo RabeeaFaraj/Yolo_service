@@ -117,6 +117,15 @@ def predict(file: UploadFile = File(...)):
         "time_took": processing_time
     }
 
+@app.get("/prediction/count")
+def get_prediction_count():
+    """
+    Get total number of prediction sessions
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        count = conn.execute("SELECT count(*) FROM prediction_sessions WHERE timestamp >= DATETIME('now', '-7 days')").fetchall()
+    return {"count": count[0][0]}
+
 @app.delete("/prediction/{uid}")
 def delete_prediction(uid: str):
     
