@@ -23,6 +23,7 @@ class Test_Count(unittest.TestCase):
         # Check response
         self.assertEqual(response.status_code, 200)
         data = response.json()
+        self.assertEqual(data.get("count"), 0)
     
     def test_prediction_count_after_prediction(self):
         response = self.client.post(
