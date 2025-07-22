@@ -34,7 +34,7 @@ model = YOLO("yolov8n.pt")
 security = HTTPBasic()
 
 def get_user_from_db(username: str):
-    conn = sqlite3.connect("/home/rabeea/Yolo_service/predictions.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT id, password_hash FROM users WHERE username = ?", (username,))
     result = cursor.fetchone()

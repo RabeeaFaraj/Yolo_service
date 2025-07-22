@@ -7,18 +7,7 @@ from fastapi.security import HTTPBasicCredentials
 class TestAuthentication(unittest.TestCase):
 
     def setUp(self):
-        init_db()
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("DROP TABLE IF EXISTS users")
-            conn.execute("""
-                CREATE TABLE users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL
-                )
-            """)
-            conn.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", 
-                         ("admin", "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"))  # "1234" in SHA-256
+        init_db()  # "1234" in SHA-256
 
     def test_authenticate_success(self):
         credentials = HTTPBasicCredentials(username="admin", password="1234")
