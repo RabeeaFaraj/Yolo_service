@@ -1,12 +1,13 @@
 import unittest
 import sqlite3
-from app import authenticate, DB_PATH
+from app import authenticate, DB_PATH, init_db
 from fastapi import HTTPException
 from fastapi.security import HTTPBasicCredentials
 
 class TestAuthentication(unittest.TestCase):
 
     def setUp(self):
+        init_db()
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute("DROP TABLE IF EXISTS users")
             conn.execute("""
