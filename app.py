@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, status
 from fastapi.responses import FileResponse, Response
 from ultralytics import YOLO
 from PIL import Image
@@ -7,11 +7,18 @@ import os
 import uuid
 import shutil
 import time
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import Depends
+import base64
+import secrets
+import hashlib
+
 
 # Disable GPU usage
 import torch
 torch.cuda.is_available = lambda: False
 
+security = HTTPBasic()
 app = FastAPI()
 
 UPLOAD_DIR = "uploads/original"
@@ -24,9 +31,58 @@ os.makedirs(PREDICTED_DIR, exist_ok=True)
 # Download the AI model (tiny model ~6MB)
 model = YOLO("yolov8n.pt")  
 
+security = HTTPBasic()
+
+def get_user_from_db(username: str):
+    conn = sqlite3.connect("/home/rabeea/Yolo_service/predictions.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, password_hash FROM users WHERE username = ?", (username,))
+    result = cursor.fetchone()
+    conn.close()
+    return result
+
+
+def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
+    user = get_user_from_db(credentials.username)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
+
+    user_id, password_hash = user
+    password_input_hash = hashlib.sha256(credentials.password.encode()).hexdigest()
+
+    if not secrets.compare_digest(password_input_hash, password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
+
+    return {"username": credentials.username, "user_id": user_id}
+
+
+def create_user(username: str, password: str):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+    if cursor.fetchone() is None:
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        cursor.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, password_hash))
+        print(f"User '{username}' created.")
+    else:
+        print(f"User '{username}' already exists.")
+    conn.commit()
+    conn.close()
+
 # Initialize SQLite
 def init_db():
+
     with sqlite3.connect(DB_PATH) as conn:
+        # Create the predictions main table to store the prediction session
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,   
+                password_hash TEXT NOT NULL
+            )
+        """)
+
+        
         # Create the predictions main table to store the prediction session
         conn.execute("""
             CREATE TABLE IF NOT EXISTS prediction_sessions (
@@ -54,12 +110,11 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_label ON detection_objects (label)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_score ON detection_objects (score)")
 
-init_db()
-
 def save_prediction_session(uid, original_image, predicted_image):
     """
     Save prediction session to database
     """
+
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
             INSERT INTO prediction_sessions (uid, original_image, predicted_image)
@@ -77,7 +132,7 @@ def save_detection_object(prediction_uid, label, score, box):
         """, (prediction_uid, label, score, str(box)))
     
 @app.post("/predict")
-def predict(file: UploadFile = File(...)):
+def predict(file: UploadFile = File(...)):  
     """
     Predict objects in an image
     """
@@ -132,8 +187,8 @@ def delete_prediction(uid: str):
     return {"status" : "deleted "}
 
 @app.get("/prediction/{uid}")
-def get_prediction_by_uid(uid: str):
-    """
+def get_prediction_by_uid(uid: str, user=Depends(authenticate)):
+    """`
     Get prediction session by uid with all detected objects
     """
     with sqlite3.connect(DB_PATH) as conn:
@@ -239,5 +294,10 @@ def health():
     return {"status": "ok"}
 
 if __name__ == "__main__":
+    init_db()  # Make sure tables exist
+    create_user("admin", "1234")  # Now safe
+    create_user("rabeea", "1234")
+    print("User created.")
+    
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8080)
