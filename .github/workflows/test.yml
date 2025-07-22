@@ -7,31 +7,32 @@ on:
 
 jobs:
   test:
-    name: Run tests and collect coverage
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout
-      - uses: actions/checkout@v4
-      
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.12'
-      
-      - name: Install dependencies
-        run: |
-          pip install -r torch-requirements.txt
-          pip install -r requirements.txt
-      
-      - name: Run tests
-        run: python -m unittest discover -s tests -p "test_*.py"
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    
+    - name: Install dependencies
+      run: |
+        pip install -r torch-requirements.txt
+        pip install -r requirements.txt
+    
+    - name: Run tests with coverage
+      run: |
+        pip install coverage
+        coverage run --omit="*/config.py,*/config-3.py,/tmp/*" -m unittest discover -s tests -p "test_*.py"
+        coverage xml
 
-      - name: Run tests with coverage
-        run:  pytest
-      
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          slug : RabeeaFaraj/Yolo_service   
+
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: true
+        token: ${{ secrets.CODECOV_TOKEN }}
