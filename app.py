@@ -46,13 +46,13 @@ def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
     user = get_user_from_db(credentials.username)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
-
+    
     user_id, password_hash = user
     password_input_hash = hashlib.sha256(credentials.password.encode()).hexdigest()
-
+    print(password_input_hash,password_hash)
+    
     if not secrets.compare_digest(password_input_hash, password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
-
     return {"username": credentials.username, "user_id": user_id}
 
 
@@ -173,7 +173,7 @@ def predict(file: UploadFile = File(...)):
     }
 
 @app.get("/prediction/count")
-def get_prediction_count():
+def get_prediction_count(user=Depends(authenticate)):
     """
     Get total number of prediction sessions
     """
@@ -181,10 +181,10 @@ def get_prediction_count():
         count = conn.execute("SELECT count(*) FROM prediction_sessions WHERE timestamp >= DATETIME('now', '-7 days')").fetchall()
     return {"count": count[0][0]}
 
-@app.delete("/prediction/{uid}")
-def delete_prediction(uid: str):
+# @app.delete("/prediction/{uid}")
+# def delete_prediction(uid: str):
     
-    return {"status" : "deleted "}
+#     return {"status" : "deleted "}
 
 @app.get("/prediction/{uid}")
 def get_prediction_by_uid(uid: str, user=Depends(authenticate)):
@@ -293,7 +293,7 @@ def health():
     """
     return {"status": "ok"}
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     init_db()  # Make sure tables exist
     create_user("admin", "1234")  # Now safe
     create_user("rabeea", "1234")
