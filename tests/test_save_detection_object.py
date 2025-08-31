@@ -1,7 +1,8 @@
 import unittest
 import sqlite3
 import os
-from app import save_detection_object, DB_PATH
+from app import DB_PATH
+from repository import save_detection_object
 
 class TestSaveDetectionObject(unittest.TestCase):
 
