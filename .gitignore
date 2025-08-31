@@ -9,5 +9,10 @@
 
 *.db
 *.pt
+*.txt
+*.json
+*.csv
 
 uploads/
+
+__pycache__
