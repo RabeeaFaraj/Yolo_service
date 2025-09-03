@@ -13,12 +13,16 @@ from db import get_db,engine
 from models import Base
 from sqlalchemy.orm import Session
 import repository
-
-
+import boto3
+from botocore.exceptions import NoCredentialsError
 # Disable GPU usage
 import torch
 torch.cuda.is_available = lambda: False
+from typing import Annotated,Optional
+from fastapi import Query
 
+S3_BUCKET = "rabeea-yolo-images"
+s3_client = boto3.client("s3")
 app = FastAPI()
 
 security=HTTPBasic()
@@ -48,16 +52,37 @@ def verify_user(credentials: Annotated[HTTPBasicCredentials, Depends(security)],
         )
     return username
 
-
 #for the "Depends" statement in predict()
 async def optional_auth(request: Request):
     auth = request.headers.get("Authorization")
     if not auth:
         return None  # No credentials provided
     return await security(request)
+
+def download_from_s3(bucket: str, key: str, local_path: str):
+    try:
+        s3_client.download_file(bucket, key, local_path)
+    except NoCredentialsError:
+        raise HTTPException(status_code=500, detail="AWS credentials not configured")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to download from S3: {str(e)}")
+
+def upload_to_s3(local_path: str, bucket: str, key: str):
+    try:
+        s3_client.upload_file(local_path, bucket, key)
+    except NoCredentialsError:
+        raise HTTPException(status_code=500, detail="AWS credentials not configured")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload to S3: {str(e)}")
+
  
 @app.post("/predict")
-def predict(file: UploadFile = File(...),credentials: Annotated[str | None, Depends(optional_auth)] = None,db: Session = Depends(get_db)):
+def predict(
+    file: Optional[UploadFile] = File(None),
+    img: Optional[str] = Query(None, description="Image key in S3"),
+    credentials: Annotated[str | None, Depends(optional_auth)] = None,
+    db: Session = Depends(get_db)
+):  
     """
     Predict objects in an image
     """
@@ -69,14 +94,32 @@ def predict(file: UploadFile = File(...),credentials: Annotated[str | None, Depe
             username = None    #Invalid credentials still allow prediction, username remains null
 
     start_time = time.time()
-    
-    ext = os.path.splitext(file.filename)[1]
     uid = str(uuid.uuid4())
-    original_path = os.path.join(UPLOAD_DIR, uid + ext)
+
+    if file:
+        # Input from direct upload
+        ext = os.path.splitext(file.filename)[1]
+        original_path = os.path.join(UPLOAD_DIR, uid + ext)
+        with open(original_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+    elif img:
+        # Input from S3
+        ext = os.path.splitext(img)[1] or ".jpg"
+        original_path = os.path.join(UPLOAD_DIR, uid + ext)
+        download_from_s3(S3_BUCKET, img, original_path)
+
+    else:
+        raise HTTPException(status_code=400, detail="No input image provided")
+    
+
+    # ext = os.path.splitext(file.filename)[1]
+    # uid = str(uuid.uuid4())
+    # original_path = os.path.join(UPLOAD_DIR, uid + ext)
     predicted_path = os.path.join(PREDICTED_DIR, uid + ext)
 
-    with open(original_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    # with open(original_path, "wb") as f:
+    #     shutil.copyfileobj(file.file, f)
 
     results = model(original_path, device="cpu")
     annotated_frame = results[0].plot()
@@ -93,6 +136,10 @@ def predict(file: UploadFile = File(...),credentials: Annotated[str | None, Depe
         bbox = box.xyxy[0].tolist()
         repository.save_detection_object(uid, label, score, bbox,db)
         detected_labels.append(label)
+
+    # Upload processed image back to S3
+    s3_output_key = f"processed/{uid}{ext}"
+    upload_to_s3(predicted_path, S3_BUCKET, s3_output_key)
 
     processing_time = round(time.time() - start_time, 2)
 
