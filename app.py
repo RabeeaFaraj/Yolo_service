@@ -86,69 +86,71 @@ def predict(
     """
     Predict objects in an image
     """
-    username = None
-    if credentials:
-        try:
-            username = verify_user(credentials,db)
-        except HTTPException:
-            username = None    #Invalid credentials still allow prediction, username remains null
+    try:
+        username = None
+        if credentials:
+            try:
+                username = verify_user(credentials, db)
+            except HTTPException:
+                username = None    # Invalid credentials still allow prediction, username remains null
 
-    start_time = time.time()
-    uid = str(uuid.uuid4())
+        start_time = time.time()
+        uid = str(uuid.uuid4())
 
-    if file:
-        # Input from direct upload
-        ext = os.path.splitext(file.filename)[1]
-        original_path = os.path.join(UPLOAD_DIR, uid + ext)
-        with open(original_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
+        if file:
+            # Input from direct upload
+            ext = os.path.splitext(file.filename)[1]
+            original_path = os.path.join(UPLOAD_DIR, uid + ext)
+            with open(original_path, "wb") as f:
+                shutil.copyfileobj(file.file, f)
 
-    elif img:
-        # Input from S3
-        ext = os.path.splitext(img)[1] or ".jpg"
-        original_path = os.path.join(UPLOAD_DIR, uid + ext)
-        download_from_s3(S3_BUCKET, img, original_path)
+        elif img:
+            # Input from S3
+            ext = os.path.splitext(img)[1] or ".jpg"
+            original_path = os.path.join(UPLOAD_DIR, uid + ext)
+            download_from_s3(S3_BUCKET, img, original_path)
 
-    else:
-        raise HTTPException(status_code=400, detail="No input image provided")
-    
+        else:
+            raise HTTPException(status_code=400, detail="No input image provided")
 
-    # ext = os.path.splitext(file.filename)[1]
-    # uid = str(uuid.uuid4())
-    # original_path = os.path.join(UPLOAD_DIR, uid + ext)
-    predicted_path = os.path.join(PREDICTED_DIR, uid + ext)
+        predicted_path = os.path.join(PREDICTED_DIR, uid + ext)
 
-    # with open(original_path, "wb") as f:
-    #     shutil.copyfileobj(file.file, f)
+        # Run YOLO inference
+        results = model(original_path, device="cpu")
+        annotated_frame = results[0].plot()
+        annotated_image = Image.fromarray(annotated_frame)
+        annotated_image.save(predicted_path)
 
-    results = model(original_path, device="cpu")
-    annotated_frame = results[0].plot()
-    annotated_image = Image.fromarray(annotated_frame)
-    annotated_image.save(predicted_path)
+        repository.save_prediction_session(uid, original_path, predicted_path, username, db)
+        
+        detected_labels = []
+        for box in results[0].boxes:
+            label_idx = int(box.cls[0].item())
+            label = model.names[label_idx]
+            score = float(box.conf[0])
+            bbox = box.xyxy[0].tolist()
+            repository.save_detection_object(uid, label, score, bbox, db)
+            detected_labels.append(label)
 
-    repository.save_prediction_session(uid, original_path, predicted_path,username,db)
-    
-    detected_labels = []
-    for box in results[0].boxes:
-        label_idx = int(box.cls[0].item())
-        label = model.names[label_idx]
-        score = float(box.conf[0])
-        bbox = box.xyxy[0].tolist()
-        repository.save_detection_object(uid, label, score, bbox,db)
-        detected_labels.append(label)
+        # Upload processed image back to S3
+        s3_output_key = f"processed/{uid}{ext}"
+        upload_to_s3(predicted_path, S3_BUCKET, s3_output_key)
 
-    # Upload processed image back to S3
-    s3_output_key = f"processed/{uid}{ext}"
-    upload_to_s3(predicted_path, S3_BUCKET, s3_output_key)
+        processing_time = round(time.time() - start_time, 2)
 
-    processing_time = round(time.time() - start_time, 2)
+        return {
+            "prediction_uid": uid, 
+            "detection_count": len(results[0].boxes),
+            "labels": detected_labels,
+            "time_took": processing_time
+        }
 
-    return {
-        "prediction_uid": uid, 
-        "detection_count": len(results[0].boxes),
-        "labels": detected_labels,
-        "time_took": processing_time
-    }
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        # Log full traceback to console for debugging
+        print("Prediction error:", error_details)
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
 
 @app.get("/prediction/count")
